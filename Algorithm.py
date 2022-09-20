@@ -1,9 +1,7 @@
-#region imports
-from AlgorithmImports import *
-#endregion
+
 
 from datetime import timedelta
-
+from QuantConnect.Data.Custom.CBOE import *
 
 class OptionChainProviderPutProtection(QCAlgorithm):
 
@@ -11,7 +9,6 @@ class OptionChainProviderPutProtection(QCAlgorithm):
         # set start/end date for backtest
         self.SetStartDate(2008, 1, 1)
         # set starting balance for backtest
-        self.SetEndDate(2009, 1, 1)
         self.SetCash(100000)
         # add the underlying asset
         self.equity = self.AddEquity("SPY", Resolution.Minute)
@@ -26,15 +23,11 @@ class OptionChainProviderPutProtection(QCAlgorithm):
         self.putContract = str()
         self.callContract = str()
         self.contractsAdded = set()
-        #initialize market open
-        self.marketOpen = self.Time
-        self.SPYstartprice = 0
-        self.startPriceTrack = 0
         
         self.initialOptionPrice = 0 #price of option when sold / bought
         self.putContractQuantity = 0 #number of puts sold in high IV envir
         self.putStrike = 0 #strike price at which puts were sold
-        self.getBack = False #are we trying to get assigned on calls?
+        self.getBack = False
         
         # parameters ------------------------------------------------------------
         self.DTE = 45 # target days till expiration
@@ -54,10 +47,6 @@ class OptionChainProviderPutProtection(QCAlgorithm):
         if self.IsWarmingUp:
             return
         
-        if self.startPriceTrack == 0:
-            self.SPYstartprice = self.Securities[self.spy].Close 
-            self.startPriceTrack = 1
-    
         if self.exchange.ExchangeOpen:
             
             #if is in get getBack mode, sell calls
@@ -77,8 +66,8 @@ class OptionChainProviderPutProtection(QCAlgorithm):
             # close put if reaches profit goal 
             if self.putContract:
                 optionHistory = self.History(self.putContract, 1, Resolution.Minute) #get option price history
-                if not optionHistory.empty and 'high' in optionHistory.columns:
-                    currentOptionPrice = max(optionHistory["high"])
+                if not optionHistory.empty:
+                    currentOptionPrice = max(optionHistory["bidlow"])
                     if currentOptionPrice <= self.initialOptionPrice * self.profitPercentTarget:
                         self.Liquidate(self.putContract)
                         self.Log(str(self.Time) + " Closed at % of max credit:" + str((self.initialOptionPrice - currentOptionPrice) / self.initialOptionPrice))
@@ -94,8 +83,8 @@ class OptionChainProviderPutProtection(QCAlgorithm):
         # if not invested and option data added successfully, sell puts
         elif not self.Portfolio[self.putContract].Invested and data.ContainsKey(self.putContract):
             optionHistory = self.History(self.putContract, 1, Resolution.Minute) #get option price history if option
-            if not optionHistory.empty and 'low' in optionHistory.columns:
-                self.initialOptionPrice = min(optionHistory["low"])
+            if not optionHistory.empty:
+                self.initialOptionPrice = min(optionHistory["bidlow"])
                 self.putContractQuantity = math.floor(((self.Portfolio.Cash / 100) / self.putContract.ID.StrikePrice))
                 self.putStrike = self.putContract.ID.StrikePrice
                 self.Sell(self.putContract, self.putContractQuantity)
@@ -178,7 +167,6 @@ class OptionChainProviderPutProtection(QCAlgorithm):
         # plot underlying's price
         self.Plot("Data Chart", self.spy, self.Securities[self.spy].Close)
         # plot strike of put option
-        self.Plot("SPY Returns to Date", (self.Securities[self.spy].Close / self.SPYstartprice))
         
         option_invested = [x.Key for x in self.Portfolio if x.Value.Invested and x.Value.Type==SecurityType.Option]
         if option_invested:
